@@ -1,0 +1,83 @@
+name: 'tag-version'
+
+on:
+  workflow_call:
+    outputs:
+      NEW_VERSION:
+        description: "New version that was tagged"
+        value: ${{jobs.compute-new-version.outputs.NEW_VERSION}}
+  push:
+    branches:
+      - "*"
+
+
+
+jobs:
+  compute-new-version:
+    runs-on: ubuntu-latest
+    outputs:
+      NEW_VERSION: ${{ steps.set-version.outputs.NEW_VERSION }}
+    steps:
+      - name: Extract branch name
+        id: extract-branch-name
+        shell: bash
+        run: |
+          BRANCH_SIMPLE=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
+          echo "BRANCH_SIMPLE=${BRANCH_SIMPLE}" >> $GITHUB_OUTPUT
+          if [ "$BRANCH_SIMPLE" = "master" ]; then
+            echo "IS_MASTER=true" >> $GITHUB_OUTPUT
+          else
+            echo "IS_MASTER=false" >> $GITHUB_OUTPUT
+          fi
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # necessary so we have the entire git history checked out (previous tags, etc.)
+
+      - name: set version
+        id: set-version
+        run: |
+          echo "BRANCH_SIMPLE=${{ steps.extract-branch-name.outputs.BRANCH_SIMPLE }}"
+          BRANCH_SIMPLE=${{ steps.extract-branch-name.outputs.BRANCH_SIMPLE }}
+
+          sudo apt update && sudo apt install -y wget jq
+          # wget https://github.com/cloudflare/semver_bash/raw/refs/heads/master/semver.sh
+          wget https://github.com/YoyoBesser/semver_bash/raw/refs/heads/master/semver.sh
+          source semver.sh
+          # CURRENT_VERSION=$(jq -r '.version' version.json)
+          CURRENT_VERSION=$(git describe --tags --abbrev=0)
+          semverParseInto "${CURRENT_VERSION}" CURRENT_MAJOR CURRENT_MINOR CURRENT_PATCH CURRENT_SPECIAL
+
+          echo "CURRENT_MAJOR: $CURRENT_MAJOR"
+          echo "CURRENT_MINOR: $CURRENT_MINOR"
+          echo "CURRENT_PATCH: $CURRENT_PATCH"
+          echo "CURRENT_SPECIAL: $CURRENT_SPECIAL"
+
+          
+          # if master, remove trailing branch identifier from version
+          if [ "${{ steps.extract-branch-name.outputs.IS_MASTER }}" = "true" ]; then
+            NEW_VERSION=$(semverIncrementPatch $CURRENT_VERSION)
+            NEW_VERSION=$(echo "$NEW_VERSION" | cut -d'-' -f1)
+            echo "NEW_VERSION: $NEW_VERSION"
+          else
+            NEW_VERSION=$(semverIncrementPatch $CURRENT_VERSION)
+            if [ $CURRENT_SPECIAL = "" ]; then
+              NEW_VERSION="${NEW_VERSION}-${BRANCH_SIMPLE}"
+            fi
+            echo "NEW_VERSION: $NEW_VERSION"
+          fi
+
+          echo "NEW_VERSION=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
+  create-tag:
+    needs: compute-new-version
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/github-script@v5
+      with:
+        script: |
+          github.rest.git.createRef({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: "refs/tags/${{ needs.compute-new-version.outputs.NEW_VERSION }}",
+            sha: context.sha
+          })
