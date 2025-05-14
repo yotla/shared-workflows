@@ -2,9 +2,14 @@ name: 'tag-version'
 
 on:
   workflow_call:
+    inputs:
+      TRUNK_BRANCH_NAME:
+        type: string
+        required: false
+        default: "master"
     outputs:
       NEW_VERSION:
-        description: "New version that was tagged"
+        description: "New version that was computed and tagged"
         value: ${{jobs.compute-new-version.outputs.NEW_VERSION}}
   push:
     branches:
@@ -24,10 +29,10 @@ jobs:
         run: |
           BRANCH_SIMPLE=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
           echo "BRANCH_SIMPLE=${BRANCH_SIMPLE}" >> $GITHUB_OUTPUT
-          if [ "$BRANCH_SIMPLE" = "master" ]; then
-            echo "IS_MASTER=true" >> $GITHUB_OUTPUT
+          if [ "$BRANCH_SIMPLE" = "${{ inputs.TRUNK_BRANCH_NAME }}" ]; then
+            echo "IS_TRUNK=true" >> $GITHUB_OUTPUT
           else
-            echo "IS_MASTER=false" >> $GITHUB_OUTPUT
+            echo "IS_TRUNK=false" >> $GITHUB_OUTPUT
           fi
       - uses: actions/checkout@v4
         with:
@@ -54,7 +59,7 @@ jobs:
 
           
           # if master, remove trailing branch identifier from version
-          if [ "${{ steps.extract-branch-name.outputs.IS_MASTER }}" = "true" ]; then
+          if [ "${{ steps.extract-branch-name.outputs.IS_TRUNK }}" = "true" ]; then
             NEW_VERSION=$(semverIncrementPatch $CURRENT_VERSION)
             NEW_VERSION=$(echo "$NEW_VERSION" | cut -d'-' -f1)
             echo "NEW_VERSION: $NEW_VERSION"
